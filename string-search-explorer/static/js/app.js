@@ -1,3 +1,9 @@
+const TEXT_DISPLAY_LIMIT = 500;
+
+const STEP_LOG_DISPLAY_LIMIT = 200;
+
+const AUTOPLAY_DEFAULT_MS = 150;
+
 // ─── STATE ───────────────────────────────────────────────────────────────────
 const state = {
   files: [],
@@ -6,6 +12,7 @@ const state = {
   lastCompare: null,
   stepIndex: 0,
   autoPlayTimer: null,
+  algorithmsMeta: [],
 };
 
 // ─── UTILS ───────────────────────────────────────────────────────────────────
@@ -50,23 +57,43 @@ function setStatus(msg, state = "ready") {
 }
 
 // ─── ALGO INFO ───────────────────────────────────────────────────────────────
-const ALGO_INFO = {
-  naive: { best: "O(n)", avg: "O(n * m)", worst: "O(n * m)", desc: "Compares pattern at every position left-to-right" },
-  rabin_karp: { best: "O(n + m)", avg: "O(n + m)", worst: "O(n * m)", desc: "Uses rolling hash to skip non-matching windows" },
-  kmp: { best: "O(n)", avg: "O(n + m)", worst: "O(n + m)", desc: "Uses LPS table to skip redundant comparisons" },
-  boyer_moore: { best: "O(n / m)", avg: "O(n / m)", worst: "O(n * m)", desc: "Scans right-to-left, jumps using bad character table" },
-};
+
+/**
+ * Popula o <select> de algoritmos e o painel de info usando os metadados
+ * carregados da API /api/algorithms. Garante que Python seja a única fonte
+ * da verdade para nomes, descrições e complexidades.
+ */
+async function loadAlgorithms() {
+  try {
+    const res = await fetch("/api/algorithms");
+    const data = await res.json();
+    state.algorithmsMeta = data;
+
+    const select = $("#alg-select");
+    select.innerHTML = "";
+    data.forEach(alg => {
+      const opt = document.createElement("option");
+      opt.value = alg.id;
+      opt.textContent = alg.name;
+      select.appendChild(opt);
+    });
+
+    updateAlgoInfo();
+  } catch (err) {
+    console.error("Failed to load algorithm metadata:", err);
+  }
+}
 
 function updateAlgoInfo() {
-  const alg = $("#alg-select").value;
-  const info = ALGO_INFO[alg];
+  const algId = $("#alg-select").value;
+  const info = state.algorithmsMeta.find(a => a.id === algId);
   if (!info) return;
   $("#algo-info").innerHTML = `
-    <div>${info.desc}</div>
+    <div>${info.description}</div>
     <div style="margin-top:6px">
-      Best: <span>${info.best}</span> &nbsp;|&nbsp;
-      Avg: <span>${info.avg}</span> &nbsp;|&nbsp;
-      Worst: <span>${info.worst}</span>
+      Best: <span>${info.complexity_best}</span> &nbsp;|&nbsp;
+      Avg: <span>${info.complexity_average}</span> &nbsp;|&nbsp;
+      Worst: <span>${info.complexity_worst}</span>
     </div>
   `;
 }
@@ -311,8 +338,6 @@ function renderStepVisualizer(result, container) {
   const text = $("#text-input").value;
   const pattern = result.pattern;
 
-  // Text display (truncated)
-  const TEXT_DISPLAY_LIMIT = 500;
   const textSlice = text.slice(0, TEXT_DISPLAY_LIMIT);
   const textMore = text.length > TEXT_DISPLAY_LIMIT;
 
@@ -355,7 +380,7 @@ function renderStepVisualizer(result, container) {
   container.appendChild(patLabel);
   container.appendChild(patViz);
 
-  // Step controls
+  // Controles — inclui slider de velocidade do auto-play
   const controls = document.createElement("div");
   controls.className = "step-controls";
   controls.innerHTML = `
@@ -365,8 +390,18 @@ function renderStepVisualizer(result, container) {
     <button class="btn btn-ghost" id="btn-next">Next</button>
     <button class="btn btn-ghost" id="btn-play">Play</button>
     <button class="btn btn-ghost" id="btn-reset">Reset</button>
+    <label class="speed-label" title="Auto-play speed">
+      Speed
+      <input type="range" id="play-speed" min="50" max="1000" value="${AUTOPLAY_DEFAULT_MS}" step="50">
+      <span id="play-speed-val">${AUTOPLAY_DEFAULT_MS}ms</span>
+    </label>
   `;
   container.appendChild(controls);
+
+  // Atualiza rótulo da velocidade em tempo real
+  controls.querySelector("#play-speed").oninput = (e) => {
+    controls.querySelector("#play-speed-val").textContent = `${e.target.value}ms`;
+  };
 
   // Step log
   const logWrap = document.createElement("div");
@@ -375,7 +410,7 @@ function renderStepVisualizer(result, container) {
   const logBody = document.createElement("div");
   logBody.id = "step-log-body";
 
-  steps.slice(0, 200).forEach((step, i) => {
+  steps.slice(0, STEP_LOG_DISPLAY_LIMIT).forEach((step, i) => {
     const entry = document.createElement("div");
     entry.className = "step-entry";
     entry.id = `step-entry-${i}`;
@@ -390,21 +425,20 @@ function renderStepVisualizer(result, container) {
     logBody.appendChild(entry);
   });
 
-  if (steps.length > 200) {
+  if (steps.length > STEP_LOG_DISPLAY_LIMIT) {
     const more = document.createElement("div");
     more.className = "no-results";
-    more.textContent = `... and ${steps.length - 200} more steps`;
+    more.textContent = `... and ${steps.length - STEP_LOG_DISPLAY_LIMIT} more steps`;
     logBody.appendChild(more);
   }
 
   logWrap.appendChild(logBody);
   container.appendChild(logWrap);
 
-  // Wire controls
+  // ── Lógica de navegação entre passos ───────────────────────────────────────
   function applyStep(idx) {
     state.stepIndex = Math.max(0, Math.min(steps.length, idx));
 
-    // Reset highlights
     $$(".text-char").forEach(el => el.className = "text-char");
     $$(".pat-char").forEach(el => el.className = "pat-char");
 
@@ -417,37 +451,31 @@ function renderStepVisualizer(result, container) {
 
     const step = steps[state.stepIndex - 1];
 
-    // Highlight text
     step.highlight_text?.forEach(i => {
       const el = $(`#tc-${i}`);
       if (!el) return;
       if (step.result === "found") el.classList.add("hl-found");
       else if (step.result === "match" || step.result === "hash_match") el.classList.add("hl-match");
       else if (step.result === "mismatch" || step.result === "hash_mismatch") {
-        const isLast = i === (step.highlight_text[step.highlight_text.length - 1]);
+        const isLast = i === step.highlight_text[step.highlight_text.length - 1];
         el.classList.add(isLast ? "hl-mismatch" : "hl-window");
-      }
-      else el.classList.add("hl-window");
+      } else el.classList.add("hl-window");
     });
 
-    // Highlight pattern
     step.highlight_pattern?.forEach(i => {
       const el = $(`#pc-${i}`);
       if (!el) return;
       if (step.result === "found") el.classList.add("hl-found");
       else if (step.result === "match") el.classList.add("hl-match");
       else if (step.result === "mismatch") {
-        const isLast = i === (step.highlight_pattern[step.highlight_pattern.length - 1]);
+        const isLast = i === step.highlight_pattern[step.highlight_pattern.length - 1];
         el.classList.add(isLast ? "hl-mismatch" : "hl-match");
-      }
-      else el.classList.add("hl-current");
+      } else el.classList.add("hl-current");
     });
 
-    // Update counter
     $("#step-cur").textContent = state.stepIndex;
     $("#step-slider").value = state.stepIndex;
 
-    // Highlight log entry
     $$(".step-entry").forEach(e => e.classList.remove("current"));
     const entryEl = $(`#step-entry-${state.stepIndex - 1}`);
     if (entryEl) {
@@ -455,7 +483,6 @@ function renderStepVisualizer(result, container) {
       entryEl.scrollIntoView({ behavior: "smooth", block: "nearest" });
     }
 
-    // Scroll text to visible area
     const tcEl = $(`#tc-${step.text_index}`);
     if (tcEl) tcEl.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }
@@ -466,6 +493,7 @@ function renderStepVisualizer(result, container) {
   $("#step-slider").oninput = (e) => { stopPlay(); applyStep(+e.target.value); };
 
   let playing = false;
+
   function stopPlay() {
     playing = false;
     clearInterval(state.autoPlayTimer);
@@ -478,10 +506,13 @@ function renderStepVisualizer(result, container) {
     playing = true;
     $("#btn-play").textContent = "Pause";
     if (state.stepIndex >= steps.length) applyStep(0);
+
+    // Lê velocidade configurada pelo usuário; valores menores = mais rápido
+    const intervalMs = parseInt($("#play-speed")?.value ?? AUTOPLAY_DEFAULT_MS, 10);
     state.autoPlayTimer = setInterval(() => {
       if (state.stepIndex >= steps.length) { stopPlay(); return; }
       applyStep(state.stepIndex + 1);
-    }, 150);
+    }, intervalMs);
   };
 }
 
@@ -554,11 +585,12 @@ function renderCompare(results) {
   table.appendChild(tbody);
   container.appendChild(table);
 
-  // Summary
   const summary = document.createElement("div");
   summary.className = "alert alert-info";
   summary.style.marginTop = "16px";
-  const winner = algs.reduce((a, b) => (results[a]?.execution_time_ms || 0) < (results[b]?.execution_time_ms || 0) ? a : b);
+  const winner = algs.reduce((a, b) =>
+    (results[a]?.execution_time_ms || 0) < (results[b]?.execution_time_ms || 0) ? a : b
+  );
   summary.textContent = `Fastest algorithm: ${results[winner]?.algorithm} (${fmtTime(results[winner]?.execution_time_ms)}) — n=${results[winner]?.text_length}, m=${results[winner]?.pattern_length}`;
   container.appendChild(summary);
 }
@@ -581,8 +613,9 @@ function showAlert(msg, type = "info") {
 }
 
 // ─── INIT ─────────────────────────────────────────────────────────────────────
-document.addEventListener("DOMContentLoaded", () => {
-  updateAlgoInfo();
+document.addEventListener("DOMContentLoaded", async () => {
+  // Carrega algoritmos da API (remove ALGO_INFO hardcoded)
+  await loadAlgorithms();
 
   // Upload zone
   const zone = $("#upload-zone");

@@ -71,6 +71,29 @@ class SearchStrategy(ABC):
         self.comparisons = 0
         self._step_counter = 0
 
+    def _build_result(
+        self,
+        text: str,
+        pattern: str,
+        occurrences: List[int],
+        elapsed_ms: float,
+        aux_structures: Dict[str, Any] = None,
+    ) -> "SearchResult":
+        return SearchResult(
+            algorithm=self.name,
+            pattern=pattern,
+            text_length=len(text),
+            pattern_length=len(pattern),
+            occurrences=occurrences,
+            total_comparisons=self.comparisons,
+            execution_time_ms=round(elapsed_ms, 4),
+            steps=self.steps,
+            aux_structures=aux_structures or {},
+            complexity_best=self.complexity_best,
+            complexity_average=self.complexity_average,
+            complexity_worst=self.complexity_worst,
+        )
+
     @abstractmethod
     def search(self, text: str, pattern: str) -> SearchResult:
         pass
@@ -78,6 +101,11 @@ class SearchStrategy(ABC):
     @property
     @abstractmethod
     def name(self) -> str:
+        pass
+
+    @property
+    @abstractmethod
+    def description(self) -> str:
         pass
 
     @property

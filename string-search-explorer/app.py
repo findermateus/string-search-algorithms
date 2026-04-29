@@ -1,32 +1,21 @@
 import os
-import json
-import dataclasses
-from flask import Flask, request, jsonify, render_template, send_from_directory
+
+from flask import Flask, jsonify, render_template, request
 from werkzeug.utils import secure_filename
-from algorithms import NaiveSearch, RabinKarpSearch, KMPSearch, BoyerMooreSearch
+
+from services.search_service import (
+    MAX_FILE_SIZE_BYTES,
+    MAX_TEXT_LENGTH,
+    get_algorithm_metadata,
+    run_all,
+    run_search,
+)
 
 app = Flask(__name__, template_folder="templates", static_folder="static")
-app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024  # 16 MB limit
+app.config["MAX_CONTENT_LENGTH"] = MAX_FILE_SIZE_BYTES
 
 UPLOAD_FOLDER = "uploads"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-
-ALGORITHMS = {
-    "naive": NaiveSearch,
-    "rabin_karp": RabinKarpSearch,
-    "kmp": KMPSearch,
-    "boyer_moore": BoyerMooreSearch,
-}
-
-
-def dataclass_to_dict(obj):
-    if dataclasses.is_dataclass(obj):
-        return {k: dataclass_to_dict(v) for k, v in dataclasses.asdict(obj).items()}
-    elif isinstance(obj, list):
-        return [dataclass_to_dict(i) for i in obj]
-    elif isinstance(obj, dict):
-        return {k: dataclass_to_dict(v) for k, v in obj.items()}
-    return obj
 
 
 @app.route("/")
@@ -36,14 +25,7 @@ def index():
 
 @app.route("/api/algorithms", methods=["GET"])
 def list_algorithms():
-    return jsonify(
-        [
-            {"id": "naive", "name": "Naive (Brute Force)"},
-            {"id": "rabin_karp", "name": "Rabin-Karp"},
-            {"id": "kmp", "name": "Knuth-Morris-Pratt (KMP)"},
-            {"id": "boyer_moore", "name": "Boyer-Moore"},
-        ]
-    )
+    return jsonify(get_algorithm_metadata())
 
 
 @app.route("/api/upload", methods=["POST"])
@@ -55,9 +37,9 @@ def upload_file():
     uploaded = []
 
     for file in files:
-        if file.filename == "":
+        if not file.filename:
             continue
-        if file and file.filename.endswith(".txt"):
+        if file.filename.endswith(".txt"):
             filename = secure_filename(file.filename)
             filepath = os.path.join(UPLOAD_FOLDER, filename)
             file.save(filepath)
@@ -85,34 +67,18 @@ def search():
     if not text or not pattern:
         return jsonify({"error": "Text and pattern are required"}), 400
 
-    if len(text) > 500_000:
-        return jsonify({"error": "Text too large (max 500,000 characters)"}), 400
-
-    # Limit steps to avoid huge payloads
-    MAX_STEPS = 2000
-
-    def run_algorithm(alg_id):
-        AlgClass = ALGORITHMS.get(alg_id)
-        if not AlgClass:
-            return None
-        alg = AlgClass()
-        result = alg.search(text, pattern)
-        result_dict = dataclass_to_dict(result)
-        if len(result_dict["steps"]) > MAX_STEPS:
-            result_dict["steps"] = result_dict["steps"][:MAX_STEPS]
-            result_dict["steps_truncated"] = True
-        return result_dict
+    if len(text) > MAX_TEXT_LENGTH:
+        return jsonify({"error": f"Text too large (max {MAX_TEXT_LENGTH:,} characters)"}), 400
 
     if all_algorithms:
-        results = {}
-        for alg_id in ALGORITHMS:
-            results[alg_id] = run_algorithm(alg_id)
+        results = run_all(text, pattern)
         return jsonify({"results": results, "mode": "compare"})
-    else:
-        result = run_algorithm(algorithm_id)
-        if result is None:
-            return jsonify({"error": f"Unknown algorithm: {algorithm_id}"}), 400
-        return jsonify({"result": result, "mode": "single"})
+
+    result = run_search(text, pattern, algorithm_id)
+    if result is None:
+        return jsonify({"error": f"Unknown algorithm: {algorithm_id}"}), 400
+
+    return jsonify({"result": result, "mode": "single"})
 
 
 if __name__ == "__main__":

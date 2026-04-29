@@ -2,14 +2,20 @@ import time
 from typing import List, Dict
 from .base import SearchStrategy, SearchResult
 
-NO_OF_CHARS = 256
-
 
 class BoyerMooreSearch(SearchStrategy):
 
     @property
     def name(self) -> str:
-        return "Boyer-Moore"
+        return "Boyer-Moore (Bad Character)"
+
+    @property
+    def description(self) -> str:
+        return (
+            "Varre o padrão da direita para a esquerda e usa a tabela Bad Character "
+            "para saltar posições após um mismatch. Implementação com heurística "
+            "Bad Character; o algoritmo completo inclui também Good Suffix."
+        )
 
     @property
     def complexity_best(self) -> str:
@@ -24,10 +30,9 @@ class BoyerMooreSearch(SearchStrategy):
         return "O(n * m)"
 
     def _build_bad_char_table(self, pattern: str) -> Dict[str, int]:
-        table = {}
-        m = len(pattern)
-        for i in range(m):
-            table[pattern[i]] = i
+        table: Dict[str, int] = {}
+        for i, ch in enumerate(pattern):
+            table[ch] = i
         return table
 
     def search(self, text: str, pattern: str) -> SearchResult:
@@ -39,8 +44,7 @@ class BoyerMooreSearch(SearchStrategy):
         start_time = time.perf_counter()
 
         bad_char = self._build_bad_char_table(pattern)
-
-        bad_char_display = {k: v for k, v in sorted(bad_char.items())}
+        bad_char_display = dict(sorted(bad_char.items()))
 
         self._add_step(
             text_index=0,
@@ -48,7 +52,7 @@ class BoyerMooreSearch(SearchStrategy):
             comparison="Building Bad Character heuristic table",
             result="info",
             aux_data={"bad_char_table": bad_char_display, "pattern": pattern},
-            note=f"Bad character table: maps each character to its last occurrence in pattern",
+            note="Bad character table: maps each character to its last occurrence in pattern",
         )
 
         shift = 0
@@ -69,11 +73,7 @@ class BoyerMooreSearch(SearchStrategy):
                     result="match" if matched else "mismatch",
                     highlight_text=list(range(shift, shift + m)),
                     highlight_pattern=[j],
-                    aux_data={
-                        "bad_char_table": bad_char_display,
-                        "shift": shift,
-                        "j": j,
-                    },
+                    aux_data={"bad_char_table": bad_char_display, "shift": shift, "j": j},
                     note=f"Comparing right-to-left at window shift={shift}, j={j}",
                 )
 
@@ -93,11 +93,9 @@ class BoyerMooreSearch(SearchStrategy):
                     aux_data={"bad_char_table": bad_char_display},
                     note=f"Full match at position {shift}",
                 )
-
-                next_shift = bad_char.get(text[shift + m], -1) if shift + m < n else -1
-                skip = m - next_shift
+                next_char_idx = bad_char.get(text[shift + m], -1) if shift + m < n else -1
+                skip = m - next_char_idx
                 shift += skip
-
                 self._add_step(
                     text_index=shift,
                     pattern_index=0,
@@ -110,11 +108,13 @@ class BoyerMooreSearch(SearchStrategy):
                 bad_char_val = bad_char.get(text[shift + j], -1)
                 skip = max(1, j - bad_char_val)
                 shift += skip
-
                 self._add_step(
                     text_index=shift,
                     pattern_index=0,
-                    comparison=f"Bad char '{text[shift - skip + j]}': last occurrence at {bad_char_val}, skip by {skip}",
+                    comparison=(
+                        f"Bad char '{text[shift - skip + j]}': "
+                        f"last occurrence at {bad_char_val}, skip by {skip}"
+                    ),
                     result="shift",
                     highlight_text=list(range(shift, min(shift + m, n))),
                     aux_data={
@@ -127,18 +127,7 @@ class BoyerMooreSearch(SearchStrategy):
                 )
 
         elapsed = (time.perf_counter() - start_time) * 1000
-
-        return SearchResult(
-            algorithm=self.name,
-            pattern=pattern,
-            text_length=n,
-            pattern_length=m,
-            occurrences=occurrences,
-            total_comparisons=self.comparisons,
-            execution_time_ms=round(elapsed, 4),
-            steps=self.steps,
+        return self._build_result(
+            text, pattern, occurrences, elapsed,
             aux_structures={"bad_char_table": bad_char_display},
-            complexity_best=self.complexity_best,
-            complexity_average=self.complexity_average,
-            complexity_worst=self.complexity_worst,
         )

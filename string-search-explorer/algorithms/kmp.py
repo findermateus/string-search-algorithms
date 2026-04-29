@@ -4,10 +4,16 @@ from .base import SearchStrategy, SearchResult
 
 
 class KMPSearch(SearchStrategy):
-
     @property
     def name(self) -> str:
         return "Knuth-Morris-Pratt (KMP)"
+
+    @property
+    def description(self) -> str:
+        return (
+            "Usa a tabela LPS (maior prefixo próprio que também é sufixo) para "
+            "evitar comparações redundantes após um mismatch, garantindo O(n + m)."
+        )
 
     @property
     def complexity_best(self) -> str:
@@ -60,8 +66,8 @@ class KMPSearch(SearchStrategy):
             note=f"LPS table computed: {lps}",
         )
 
-        i = 0  # index for text
-        j = 0  # index for pattern
+        i = 0
+        j = 0
 
         while i < n:
             self.comparisons += 1
@@ -115,18 +121,4 @@ class KMPSearch(SearchStrategy):
                     i += 1
 
         elapsed = (time.perf_counter() - start_time) * 1000
-
-        return SearchResult(
-            algorithm=self.name,
-            pattern=pattern,
-            text_length=n,
-            pattern_length=m,
-            occurrences=occurrences,
-            total_comparisons=self.comparisons,
-            execution_time_ms=round(elapsed, 4),
-            steps=self.steps,
-            aux_structures={"lps_table": lps},
-            complexity_best=self.complexity_best,
-            complexity_average=self.complexity_average,
-            complexity_worst=self.complexity_worst,
-        )
+        return self._build_result(text, pattern, occurrences, elapsed, aux_structures={"lps_table": lps})

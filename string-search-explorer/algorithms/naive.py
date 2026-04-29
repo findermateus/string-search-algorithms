@@ -4,10 +4,16 @@ from .base import SearchStrategy, SearchResult
 
 
 class NaiveSearch(SearchStrategy):
-
     @property
     def name(self) -> str:
         return "Naive (Brute Force)"
+
+    @property
+    def description(self) -> str:
+        return (
+            "Compara o padrão em cada posição do texto da esquerda para a direita, "
+            "caractere por caractere, sem nenhum pré-processamento."
+        )
 
     @property
     def complexity_best(self) -> str:
@@ -65,17 +71,4 @@ class NaiveSearch(SearchStrategy):
                 )
 
         elapsed = (time.perf_counter() - start_time) * 1000
-
-        return SearchResult(
-            algorithm=self.name,
-            pattern=pattern,
-            text_length=n,
-            pattern_length=m,
-            occurrences=occurrences,
-            total_comparisons=self.comparisons,
-            execution_time_ms=round(elapsed, 4),
-            steps=self.steps,
-            complexity_best=self.complexity_best,
-            complexity_average=self.complexity_average,
-            complexity_worst=self.complexity_worst,
-        )
+        return self._build_result(text, pattern, occurrences, elapsed)
